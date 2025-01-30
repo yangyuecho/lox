@@ -1,5 +1,5 @@
 var language = "lox";
 var a = "abc";
-$$$
+// $$$
 var b = 10.2;
 var b2 = "#333";
