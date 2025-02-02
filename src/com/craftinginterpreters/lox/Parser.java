@@ -1,6 +1,7 @@
 package com.craftinginterpreters.lox;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static com.craftinginterpreters.lox.TokenType.*;
@@ -12,8 +13,20 @@ declaration    → varDecl
                | statement ;
 
 statement      → exprStmt
+               | forStmt
+               | ifStmt
                | printStmt
+               | whileStmt
                | block ;
+
+forStmt        → "for" "(" ( varDecl | exprStmt | ";" )
+                 expression? ";"
+                 expression? ")" statement ;
+
+whileStmt      → "while" "(" expression ")" statement ;
+
+ifStmt         → "if" "(" expression ")" statement  (chapter 9)
+               ( "else" statement )? ;
 
 block          → "{" declaration* "}" ;
 
@@ -41,7 +54,9 @@ printStmt      → "print" expression ";" ;
 
 expression     → assignment ;
 assignment     → IDENTIFIER "=" assignment
-               | equality ;
+               | logic_or ;
+logic_or       → logic_and ( "or" logic_and )* ;  (chapter 9)
+logic_and      → equality ( "and" equality )* ;  (chapter 9)
 // precedence rules as C, going from lowest to highest. 优先级
 // 此处的每个规则仅匹配其当前优先级或更高优先级的表达式
 equality       → comparison ( ( "!=" | "==" ) comparison )* ;
@@ -103,16 +118,82 @@ public class Parser {
     }
 
     private Stmt statement() {
+        if (match(FOR)) return forStatement();
+        if (match(IF)) return ifStatement();
         if (match(PRINT)) return printStatement();
         if (match(LEFT_BRACE)) return new Stmt.Block(block());
+        if (match(WHILE)) return whileStatement();
 
         return expressionStatement();
+    }
+
+    // 语法糖, 脱糖
+    private Stmt forStatement() {
+        consume(LEFT_PAREN, "Expect '(' after 'for'.");
+        // 初始化式
+        // 如果(后面的标记是分号，那么初始化式就被省略了。
+        // 否则，我们就检查var关键字，看它是否是一个变量声明。如果这两者都不符合，那么它一定是一个表达式
+        Stmt initializer;
+        if (match(SEMICOLON)) {
+          initializer = null;
+        } else if (match(VAR)) {
+          initializer = varDeclaration();
+        } else {
+          initializer = expressionStatement();
+        }
+        // 条件语句
+        Expr condition = null;
+        if (!check(SEMICOLON)) {
+          condition = expression();
+        }
+        consume(SEMICOLON, "Expect ';' after loop condition.");
+        // 增量语句 i++
+        Expr increment = null;
+        if (!check(RIGHT_PAREN)) {
+          increment = expression();
+        }
+        consume(RIGHT_PAREN, "Expect ')' after for clauses.");
+        // 循环主体
+        Stmt body = statement();
+        if (increment != null) {
+          // 后面执行增量子语句
+          body = new Stmt.Block(
+              Arrays.asList(
+                  body,
+                  new Stmt.Expression(increment)));
+        }
+        if (condition == null) condition = new Expr.Literal(true);
+        body = new Stmt.While(condition, body);
+        // 最后，如果有初始化式，它会在整个循环之前运行一次。
+        // 我们的做法是，再次用代码块来替换整个语句，该代码块中首先运行一个初始化式，然后执行循环。
+        if (initializer != null) {
+          body = new Stmt.Block(Arrays.asList(initializer, body));
+        }
+    
+        return body;
     }
 
     private Stmt printStatement() {
         Expr value = expression();
         consume(SEMICOLON, "Expect ';' after value.");
         return new Stmt.Print(value);
+    }
+
+    private Stmt ifStatement() {
+      consume(LEFT_PAREN, "Expect '(' after 'if'.");
+      Expr condition = expression();
+      consume(RIGHT_PAREN, "Expect ')' after if condition."); 
+  
+      Stmt thenBranch = statement();
+      Stmt elseBranch = null;
+      // else与前面最近的if绑定在一起
+      if (match(ELSE)) {
+        // 因为 ifStatement()在返回之前会继续寻找一个else子句，
+        // 连续嵌套的最内层调用在返回外部的if语句之前，会先为自己声明else语句。
+        elseBranch = statement();
+      }
+  
+      return new Stmt.If(condition, thenBranch, elseBranch);
     }
 
     private Stmt varDeclaration() {
@@ -125,6 +206,15 @@ public class Parser {
     
         consume(SEMICOLON, "Expect ';' after variable declaration.");
         return new Stmt.Var(name, initializer);
+    }
+
+    private Stmt whileStatement() {
+      consume(LEFT_PAREN, "Expect '(' after 'while'.");
+      Expr condition = expression();
+      consume(RIGHT_PAREN, "Expect ')' after condition.");
+      Stmt body = statement();
+  
+      return new Stmt.While(condition, body);
     }
 
     private Stmt expressionStatement() {
@@ -145,7 +235,7 @@ public class Parser {
     }
 
     private Expr assignment() {
-      Expr expr = equality();
+      Expr expr = or();
   
       if (match(EQUAL)) {
         // 左值不用求值
@@ -158,6 +248,30 @@ public class Parser {
         }
   
         error(equals, "Invalid assignment target."); 
+      }
+  
+      return expr;
+    }
+
+    private Expr or() {
+      Expr expr = and();
+  
+      while (match(OR)) {
+        Token operator = previous();
+        Expr right = and();
+        expr = new Expr.Logical(expr, operator, right);
+      }
+  
+      return expr;
+    }
+
+    private Expr and() {
+      Expr expr = equality();
+  
+      while (match(AND)) {
+        Token operator = previous();
+        Expr right = equality();
+        expr = new Expr.Logical(expr, operator, right);
       }
   
       return expr;

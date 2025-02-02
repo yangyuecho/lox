@@ -24,7 +24,7 @@ class Environment {
         // 因为新变量总是在当前最内层的作用域中声明
         // 所以不用修改
         values.put(name, value);
-        System.out.println("define " + name + " " + value);
+        // System.out.println("define " + name + " " + value);
     }
 
     Object get(Token name) {
@@ -42,7 +42,7 @@ class Environment {
     // The key difference between assignment and definition is that assignment is not allowed to create a new variable.
     void assign(Token name, Object value) {
         if (values.containsKey(name.lexeme)) {
-            System.out.println("assign " + name.lexeme + " " + value);
+            // System.out.println("assign " + name.lexeme + " " + value);
             values.put(name.lexeme, value);
             return;
         }
