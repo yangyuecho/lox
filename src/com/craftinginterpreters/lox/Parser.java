@@ -9,15 +9,23 @@ import static com.craftinginterpreters.lox.TokenType.*;
 /* (chapter 8 - 2)
 program        → declaration* EOF ;
 
-declaration    → varDecl
+declaration    → funDecl
+               | varDecl
                | statement ;
+
+funDecl        → "fun" function ;
+function       → IDENTIFIER "(" parameters? ")" block ;
+parameters     → IDENTIFIER ( "," IDENTIFIER )* ;
 
 statement      → exprStmt
                | forStmt
                | ifStmt
                | printStmt
+               | returnStmt
                | whileStmt
                | block ;
+
+returnStmt     → "return" expression? ";" ;
 
 forStmt        → "for" "(" ( varDecl | exprStmt | ";" )
                  expression? ";"
@@ -63,8 +71,9 @@ equality       → comparison ( ( "!=" | "==" ) comparison )* ;
 comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
 term           → factor ( ( "-" | "+" ) factor )* ;
 factor         → unary ( ( "/" | "*" ) unary )* ;
-unary          → ( "!" | "-" ) unary
-               | primary ;
+unary          → ( "!" | "-" ) unary | call ;
+call           → primary ( "(" arguments? ")" )* ;
+arguments      → expression ( "," expression )* ;
 // all the literals and grouping expressions.
 primary        → NUMBER | STRING | "true" | "false" | "nil"
                 | "(" expression ")" ;
@@ -108,8 +117,8 @@ public class Parser {
 
     private Stmt declaration() {
         try {
+          if (match(FUN)) return function("function");
           if (match(VAR)) return varDeclaration();
-    
           return statement();
         } catch (ParseError error) {
           synchronize();
@@ -121,10 +130,22 @@ public class Parser {
         if (match(FOR)) return forStatement();
         if (match(IF)) return ifStatement();
         if (match(PRINT)) return printStatement();
+        if (match(RETURN)) return returnStatement();
         if (match(LEFT_BRACE)) return new Stmt.Block(block());
         if (match(WHILE)) return whileStatement();
 
         return expressionStatement();
+    }
+
+    private Stmt returnStatement() {
+      Token keyword = previous();
+      Expr value = null;
+      if (!check(SEMICOLON)) {
+        value = expression();
+      }
+  
+      consume(SEMICOLON, "Expect ';' after return value.");
+      return new Stmt.Return(keyword, value);
     }
 
     // 语法糖, 脱糖
@@ -221,6 +242,27 @@ public class Parser {
         Expr expr = expression();
         consume(SEMICOLON, "Expect ';' after expression.");
         return new Stmt.Expression(expr);
+    }
+
+    private Stmt.Function function(String kind) {
+        Token name = consume(IDENTIFIER, "Expect " + kind + " name.");
+        consume(LEFT_PAREN, "Expect '(' after " + kind + " name.");
+        List<Token> parameters = new ArrayList<>();
+        if (!check(RIGHT_PAREN)) {
+          do {
+            if (parameters.size() >= 255) {
+              error(peek(), "Can't have more than 255 parameters.");
+            }
+
+            parameters.add(
+                consume(IDENTIFIER, "Expect parameter name."));
+          } while (match(COMMA));
+        }
+        consume(RIGHT_PAREN, "Expect ')' after parameters.");
+
+        consume(LEFT_BRACE, "Expect '{' before " + kind + " body.");
+        List<Stmt> body = block();
+        return new Stmt.Function(name, parameters, body);
     }
 
     private List<Stmt> block() {
@@ -405,7 +447,42 @@ public class Parser {
           return new Expr.Unary(operator, right);
         }
     
-        return primary();
+        return call();
+    }
+
+    // call           → primary ( "(" arguments? ")" )* ;
+    private Expr call() {
+      Expr expr = primary();
+  
+      while (true) { 
+        if (match(LEFT_PAREN)) {
+          expr = finishCall(expr);
+        } else {
+          break;
+        }
+      }
+  
+      return expr;
+    }
+
+    private Expr finishCall(Expr callee) {
+      List<Expr> arguments = new ArrayList<>();
+      // check if the zero-argument case
+      if (!check(RIGHT_PAREN)) {
+        do {
+          // Java规范规定一个方法可以接受不超过255个参数。
+          // 这里和 java 保持一致
+          if (arguments.size() >= 255) {
+            error(peek(), "Can't have more than 255 arguments.");
+          }
+          arguments.add(expression());
+        } while (match(COMMA));
+      }
+  
+      Token paren = consume(RIGHT_PAREN,
+                            "Expect ')' after arguments.");
+  
+      return new Expr.Call(callee, paren, arguments);
     }
 
     // primary   → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" ;
