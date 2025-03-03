@@ -22,17 +22,26 @@ public class Lox {
         List<Stmt> statements = parser.parse();
 
         // // For now, just print the tokens.
-        // for (Token token : tokens) {
-        //     System.out.println(token);
-        // }
+//         for (Token token : tokens) {
+//             System.out.println(token);
+//         }
+
         if (hadError) return;
 
         // System.out.println(new AstPrinter().print(expression));
         // interpreter.interpret(expression);
+        // 变量解析
+
+        Resolver resolver = new Resolver(interpreter);
+        resolver.resolve(statements);
+
+        if (hadError) return;
+
         interpreter.interpret(statements);
     }
 
     private static void runFile(String path) throws IOException {
+        System.out.println(path);
         // Paths.get(path) 将字符串形式的文件路径转换为 Path 对象
         // 使用上述 Path 对象读取文件的所有字节到一个字节数组 bytes 中。这个方法尝试一次性读取整个文件，所以适用于读取小到中等大小的文件。
         byte[] bytes = Files.readAllBytes(Paths.get(path));
